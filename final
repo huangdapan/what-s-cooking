@@ -1,0 +1,246 @@
+from math import log
+import operator
+import time
+import numpy as np  # linear algebra
+import pandas as pd  # data processing, CSV file I/O (e.g. pd.read_csv)
+import json
+from pandas import DataFrame
+import copy
+import pickle
+import math
+
+def get_train_data(train_path):
+    f = open(file=train_path, encoding='utf-8')
+    train_data = json.load(f)
+    return train_data
+
+
+def get_test_data(test_path):
+    f = open(file=test_path, encoding='utf-8')
+    test_data = json.load(f)
+    return test_data
+
+
+def clear_account(lists):
+    wokey = {}
+    wokey = wokey.fromkeys(lists)
+    word_1 = list(wokey.keys())
+    for i in word_1:
+        wokey[i] = lists.count(i)
+    return wokey
+
+
+def sort_1(wokey):
+    wokey_1 = {}
+    wokey_1 = sorted(wokey.items(), key=lambda d: d[1], reverse=True)
+    wokey_1 = dict(wokey_1)
+    return wokey_1
+
+def top_20(final_dict, allnum, recipe_list):
+    dict_list = list(final_dict.keys())
+    TF_dict = copy.deepcopy(final_dict)
+    IDF_dict = copy.deepcopy(final_dict)
+    TF_IDF_dict = copy.deepcopy(final_dict)
+    for item in dict_list:
+        TF_dict[item] = TF_dict[item] / allnum
+        IDF_dict[item] = math.log2(len(recipe_list) / final_dict[item] + 1)
+        TF_IDF_dict[item] = TF_dict[item] * IDF_dict[item]
+    TF_IDF_dict = sort_1(TF_IDF_dict)
+    key_list = list(TF_IDF_dict.keys())
+    return key_list[0:20]
+
+def get_features_list(train_data, cuisine):
+    type_list = []
+    for datai in train_data:
+        for ingredients in datai['ingredients']:
+            if datai['cuisine'] == cuisine:
+                type_list.append(ingredients)
+    return type_list
+
+def calcshan(dataSet):
+    lenDataSet = len(dataSet)
+    p = {}
+    H = 0.0
+    for data in dataSet:
+        currentLabel = data[-1]
+        if currentLabel not in p.keys():
+            p[currentLabel] = 0
+        p[currentLabel] += 1
+    for key in p:
+        px = float(p[key]) / float(lenDataSet)
+        H -= px * log(px, 2)
+    return H
+
+def spiltData(dataSet, axis, value):
+    subDataSet = []
+    for data in dataSet:
+        subData = []
+        if data[axis] == value:
+            subData = data[:axis]
+            subData.extend(data[axis + 1:])
+            subDataSet.append(subData)
+    return subDataSet
+
+# CART
+def CART_chooseBestFeatureToSplit(dataset):
+    lenFeatures = len(dataset[0]) - 1
+    baseGini = float('inf')
+    bestFeature = -1
+    for i in range(lenFeatures):
+        feature = [example[i] for example in dataset]
+        uniquefeature = set(feature)
+        gini = 0.0
+        for value in uniquefeature:
+            subdataset = spiltData(dataset, i, value)
+            p = len(subdataset) / float(len(dataset))
+            subp = len(spiltData(subdataset, -1, '0')) / float(len(subdataset))
+        gini += p * (1.0 - pow(subp, 2) - pow(1 - subp, 2))
+        if (gini < baseGini):
+            baseGini = gini
+            bestFeature = i
+    return bestFeature
+
+def majorityCnt(classList):
+    classCount = {}
+    for vote in classList:
+        if vote not in classCount.keys(): classCount[vote] = 0
+        classCount[vote] += 1
+    sortedClassCount = sorted(classCount.items(), key=operator.itemgetter(1), reverse=True)
+    return sortedClassCount[0][0]
+
+def CART_createTree(dataset, labels):
+    classList = [example[-1] for example in dataset]
+    if classList.count(classList[0]) == len(classList):
+        return classList[0]
+    if len(dataset[0]) == 1:
+        return majorityCnt(classList)
+    bestFeat = CART_chooseBestFeatureToSplit(dataset)
+    bestFeatLabel = labels[bestFeat]
+    CARTTree = {bestFeatLabel: {}}
+    featValues = [example[bestFeat] for example in dataset]
+    uniqueVals = set(featValues)
+    for value in uniqueVals:
+        subLabels = labels[:]
+        CARTTree[bestFeatLabel][value] = CART_createTree(spiltData(dataset, bestFeat, value), subLabels)
+    return CARTTree
+
+def classify(tree, label, testVec):
+    firstFeat = list(tree.keys())[0]
+    secondDict = tree[firstFeat]
+    labelIndex = label.index(firstFeat)
+    classLabel = '0'
+    for key in secondDict.keys():
+        if testVec[labelIndex] == key:
+            if type(secondDict[key]).__name__ == 'dict':
+                classLabel = classify(secondDict[key], label, testVec)
+            else:
+                classLabel = secondDict[key]
+    return classLabel
+
+def storeTree(tree, filename):
+    fw = open(filename, 'wb')
+    pickle.dump(tree, fw)
+    fw.close()
+
+def loadTree(filename):
+    fr = open(filename, 'rb')
+    return pickle.load(fr)
+
+if __name__ == '__main__':
+    cuisine_set = set()
+    recipe_set = set()
+    features = set()
+    recipe_list = list()
+    all_ingredients = list()
+    cuisine_list = list()
+
+    train_path = 'D:/study/train.json'
+    train_data = get_train_data(train_path)
+    N = len(train_data)
+    for datai in train_data:
+        cuisine_list.append(datai['cuisine'])  #39774菜系list
+        cuisine_set.add(datai['cuisine'])  # 菜系种类20set
+        recipe_list.append(datai['ingredients'])  # 所有菜单的list39774
+        for ingredients in datai['ingredients']:
+            recipe_set.add(ingredients)  # 特征数6714set
+            all_ingredients.append(ingredients)#全部特征428275list
+
+    lists = []
+    for cuisine in cuisine_set:
+        lists.append(get_features_list(train_data=train_data, cuisine=cuisine))
+
+    recipe_clear_dict = clear_account(all_ingredients)
+    recipe_final_dict = sort_1(recipe_clear_dict)
+    top10 = list(recipe_final_dict.keys())[0:10]
+
+    for i in range(len(lists)):
+        dicti = clear_account(lists[i])
+        final_dict = sort_1(dicti)
+        listi = top_20(final_dict=final_dict, allnum=len(lists[i]), recipe_list=lists[i])
+        for j in listi:
+            features.add(j)
+
+    top10 = set(top10)
+    features = features - top10
+    M = len(features)
+    features = list(features)
+    print(features)
+
+    data = np.zeros([N, M])
+    for i in range(N):
+        datai = train_data[i]
+        for ingredients in datai['ingredients']:
+            if ingredients in features:
+                column = features.index(ingredients)
+                data[i, column] = 1
+
+    traindataset = DataFrame(data=data, columns=features)
+    traindataset['cuisine'] = cuisine_list
+    traindataset.to_csv('D:/study/dataset.csv')
+
+    test_path = 'D:/study/test.json'
+    test_data = get_test_data(test_path)
+    testN = len(test_data)
+
+    data = np.zeros([testN, M])
+    for i in range(testN):
+        datai = test_data[i]
+        for ingredients in datai['ingredients']:
+            if ingredients in features:
+                column = features.index(ingredients)
+                data[i, column] = 1
+
+    testdataset = DataFrame(data=data, columns=features)
+    testdataset.to_csv('D:/study/testdataset.csv')
+
+    df = pd.read_csv('D:/study/dataset.csv')
+    print(features)
+    datalists = []
+    for index in df.index:
+        i = df.loc[index][1:]
+        i = list(i)
+        datalists.append(i)
+    # filename = 'D:/study/CARTTree'
+    t1 = time.clock()
+    tree = CART_createTree(dataset=datalists,labels=features)
+    t2 = time.clock()
+    print(t2 - t1)
+
+    testdf = pd.read_csv('D:/study/testdataset.csv')
+    testlists = []
+    t3 = time.clock()
+    for index in testdf.index:
+        j = testdf.loc[index][1:]
+        j = list(j)
+        print(features)
+        testlists.append(classify(tree=tree,label=features,testVec=j))
+    t4 = time.clock()
+    result = DataFrame()
+    id_list = []
+    for data in test_data:
+        id_list.append(data['id'])
+    result['id'] = id_list
+    result['cuisine'] = testlists
+    result.to_csv('sample_submission.csv')
+    print(t4 - t3)
+    print(result)
